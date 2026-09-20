@@ -1,4 +1,7 @@
 #include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
 
 #ifndef MYSH
 #define MYSH
@@ -54,7 +57,35 @@ void check_exit_condition(){
     if (strcmp(buffer, "exit") == 0) {
         exit(0);
     }    
+}
 
+bool buffer_overflow(){
+    if (bytes_read == BUFFER_SIZE - 1 && buffer[bytes_read - 1] != '\n'){
+        return true;
+    }
+    return false;
+}
+
+void format_string(){
+    if (bytes_read > 0 && buffer[bytes_read - 1] == '\n'){
+        buffer[bytes_read - 1] = '\0';
+        bytes_read--;
+    } else if (bytes_read > 0) {
+        buffer[bytes_read] = '\0';
+    }
+}
+
+// Safety measure for when there is a buffer overflow when the user typed more than what was allowewd
+bool buffer_overflow_detected(){
+    if (buffer_overflow()){
+        // Let the user know too many characters inputted
+        write_error();
+        // Get rid of trailing characters overflowing from buffer
+        flush_trailing_chars();
+        
+        return true;
+    }    
+    return false;
 }
 
 #endif
