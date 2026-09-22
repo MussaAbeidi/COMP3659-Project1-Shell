@@ -1,12 +1,9 @@
 #include <unistd.h>
-#include <string.h>
 #include "mysh.h"
 
 int main() {
-    
     // Poll for input from the user until 'exit' is executed
     while(1) {
-
         // Prefix "$ " for input
         print_prompt();
         // Get keyboard input from user
