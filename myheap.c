@@ -9,20 +9,18 @@ static char *freep = heap;
 
 char *alloc(unsigned int size)
 {
-  if (size > HEAP_SIZE) {
-    return -1;
+  if (freep + size > heap + HEAP_SIZE) {
+    return NULL;
   }
-  int i = 0;
-  char *assignedStart[i]; 
-  
-  for (i = 0; i < HEAP_SIZE; i++) {
-    
-  }
-  return 0;     /* TO DO */
+
+  char *ptr = freep;
+  freep += size;
+  return ptr;     /* TO DO */
 }
 
 
 void free_all()
 {
+  freep = heap;
   /* TO DO */
 }
