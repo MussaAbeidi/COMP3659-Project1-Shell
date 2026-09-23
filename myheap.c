@@ -9,6 +9,15 @@ static char *freep = heap;
 
 char *alloc(unsigned int size)
 {
+  if (size > HEAP_SIZE) {
+    return -1;
+  }
+  int i = 0;
+  char *assignedStart[i]; 
+  
+  for (i = 0; i < HEAP_SIZE; i++) {
+    
+  }
   return 0;     /* TO DO */
 }
 

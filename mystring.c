@@ -14,13 +14,6 @@ unsigned int mystrlen(const char *s)
 
 int mystrcmp(const char *s1, const char *s2)
 {
-    lenS1 = mystrlen(s1);
-    lenS2 = mystrlen(s2);
-
-    if (lenS1 != lenS2) {
-        return -1;
-    }
-
     while (*s1) {
         if (*s1 != *s2) {
             return -1;
