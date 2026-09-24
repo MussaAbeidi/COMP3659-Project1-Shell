@@ -9,4 +9,7 @@ struct Command
   unsigned int argc;
 };
 
+void get_command(struct Command *command);
+void run_command(struct Command *command);
+
 #endif

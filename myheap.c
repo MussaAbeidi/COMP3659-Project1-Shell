@@ -15,12 +15,11 @@ char *alloc(unsigned int size)
 
   char *ptr = freep;
   freep += size;
-  return ptr;     /* TO DO */
+  return ptr;
 }
 
 
 void free_all()
 {
   freep = heap;
-  /* TO DO */
 }
