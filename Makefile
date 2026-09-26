@@ -10,7 +10,10 @@ mystring.o: mystring.c mystring.h
 myheap.o: myheap.c myheap.h
 	gcc -c myheap.c
 
+jobs.o: jobs.c mystring.h jobs.h myheap.h 
+	gcc -c jobs.c
+
 clean:
 	/usr/bin/rm -f *.o mysh
 
-all: clean mysh
+all: clean mysh 

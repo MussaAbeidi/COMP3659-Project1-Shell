@@ -58,12 +58,13 @@ int check_read_error()
     return 0;
 }
 
-void check_exit_condition()
+int check_exit_condition()
 {
     if (strcmp(buffer, "exit") == 0)
     {
-        exit(0);
+        return 1;
     }    
+    return 0;
 }
 
 int buffer_overflow(){
@@ -100,9 +101,68 @@ int buffer_overflow_detected()
     return 0;
 }
 
-void check_trailing_ampersand()
+int check_trailing_ampersand()
 {
+    if(buffer[bytes_read - 1] == '&')
+    {
+        return 1;
+    }
+    return 0;
+}
 
+void remove_ampersand()
+{
+    buffer[bytes_read - 1] = '\0';
+}
+
+int tokenize_string(struct Command *command)
+{
+    char *start = buffer;
+    char *end;
+    command->argc = 0;
+
+    // Skip over leading whitespace
+    while(*start && (*start == ' ' || *start == '\t'))
+    {   
+        start++;
+    }
+    // Empty string inputted
+    if (!*start) {
+        command->argc = 0;
+        return 0;
+    }
+    while(*start && (command->argc) < MAX_ARGS)
+    {
+        end = start;
+        while (*end && (*end != ' ' && *end != '\t')) 
+        {
+            end++;
+        }
+        int token_length = end - start;
+        char *token = alloc(token_length + 1);
+        // Trying to exceed heap limit
+        if (token == NULL)
+        {
+            return HEAP_EXCEEDED;
+        }
+        char temp = *end;
+        *end = '\0';
+
+        my_strcpy(start, token);
+        *end = temp;
+        start = end;
+        
+        command->argv[command->argc] = token;
+        command->argc++;
+        while (*start && (*start == ' ' || *start == '\t')) 
+        {
+            start++;
+        }
+
+    }
+    
+    command->argv[command->argc] = NULL;
+    return 0;
 }
 
 int get_command(struct Command *command)
@@ -120,6 +180,16 @@ int get_command(struct Command *command)
         return BUFFER_OVERFLOW;
     }
     format_string();
+    if (check_exit_condition())
+    {
+        return EXIT;
+    }
+    if (check_trailing_ampersand())
+    {
+        command->background_status = 1;
+        remove_ampersand();
+    }
+    tokenize_string(command);
 
     return 0;
 }

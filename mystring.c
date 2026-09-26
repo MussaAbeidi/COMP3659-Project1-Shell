@@ -28,7 +28,7 @@ int my_strcmp(const char *string_1, const char *string_2)
     return 1;
 }
 
-char *my_strcpy(char *dest_string, const char *src_string)
+char *my_strcpy(const char *src_string, char *dest_string)
 {
     char *start_address = dest_string;
     unsigned int src_string_len = my_strlen(src_string);

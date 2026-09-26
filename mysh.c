@@ -16,10 +16,11 @@ int main(int argc, char *argv[], char *envp[])
 		{
 			continue;
 		}
-		if (error == READ_ERROR)
+		if (error == READ_ERROR || error == EXIT)
 		{
 			return 1;
 		}
+
 	}
 	/* TO DO: prompt for and read command line */
 	/*
