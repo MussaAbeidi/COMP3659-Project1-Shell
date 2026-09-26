@@ -1,40 +1,45 @@
 #include "mystring.h"
 #include <string.h>       /* TO DO: initial cheat! Remove this line and all library dependency evetually */
+#include <stdio.h>
 
-
-unsigned int mystrlen(const char *s)
+unsigned int my_strlen(const char *string_char)
 {
     int count = 0;
-    while (*s != "\0") {
+    while (*string_char != '\0') 
+    {
+        string_char++;
         count++;
     }
     return count;   /* TO DO: replace string library wrappers with non-library code */
 }
 
 
-int mystrcmp(const char *s1, const char *s2)
+int my_strcmp(const char *string_1, const char *string_2)
 {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
+    while (*string_1 && (*string_1 == *string_2)) 
+    {
+        string_1++;
+        string_2++;
     }
-        if (*s1 == *s2) {
+        if (*string_1 == *string_2) 
+        {
             return 0;
         }
-    return -1;
+    return 1;
 }
 
-char *mystrcpy(char *dest, const char *src)
+char *my_strcpy(char *dest_string, const char *src_string)
 {
-    char *startAdd = dest;
-    srcLen = mystrlen(*src);
+    char *start_address = dest_string;
+    unsigned int src_string_len = my_strlen(src_string);
     
-    while (*src) {
-        *dest = *src;
-        src++;
-        dest++;
+    while (*src_string) 
+    {
+        *dest_string = *src_string;
+        src_string++;
+        dest_string++;
     }
-    *dest = "\0";
+    *dest_string = '\0';
 
-    return *startAdd;
+    return start_address;
 }
