@@ -11,7 +11,6 @@ int main(int argc, char *argv[], char *envp[])
 
   get_command(&command);
 
-  /* TO DO: prompt for and read command line */
 
   while (!exitShell)
   {
