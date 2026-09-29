@@ -18,6 +18,8 @@ struct Command
 
 int get_command(struct Command *command);
 void run_command(struct Command *command);
+void run_child_process(struct Command *command);
+void wait_for_foreground_process(pid_t pid, struct Command *command);
 void print_prompt();
 void read_input();
 void print_error(const char *message, int length);
@@ -30,5 +32,6 @@ int buffer_overflow();
 void format_string();
 int buffer_overflow_detected();
 int tokenize_string(struct Command *command);
+
 
 #endif

@@ -1,4 +1,3 @@
-#include <stdio.h> // REMOVE
 #include <unistd.h>
 #include "jobs.h"
 #include "myheap.h"
@@ -197,19 +196,42 @@ int get_command(struct Command *command)
     return 0;
 }
 
+void run_child_process(struct Command *command)
+{
+    // execve is used to execute the command in the child process. returns (-1) only if there is an error
+    // execve takes in the path to the command, the arguments, and the environment variables (NULL in this case)
+    if (execve(command->argv[0], command->argv, NULL) == -1)
+    {
+        const char exec_error[] = "Error: Command execution failed.\n";
+        print_error(exec_error, my_strlen(exec_error));
+        
+        // using _exit wrapper to terminate the child process safely
+        _exit(1); 
+    }
+}
+
+void wait_for_foreground_process(pid_t pid, struct Command *command)
+{
+    // if background_status == 0, we wait for the child process to finish before returning to the prompt
+    if (command->background_status == 0)
+    {
+        int status;
+        waitpid(pid, &status, 0);
+    }
+    // if background_status == 1, we do not wait for the child process to finish and return to the prompt immediately
+}
+
 void run_command(struct Command *command)
 {
-    // if command is empty or the first argument is NULL, we do not execute anything
+    // Do not execute if command is empty
     if (command->argc == 0 || command->argv[0] == NULL)
     {
         return;
     }
-
-    // creating a new child process
-    // child will execute the command, parent will wait for child to finish if background_status is 0
+    
     pid_t pid = fork();
 
-    // if pid is less than 0 the fork failed
+    // if pid < 0, then fork failed
     if (pid < 0)
     {
         // printing an error message to the user if the fork failed
@@ -219,27 +241,11 @@ void run_command(struct Command *command)
     // if pid is equal to 0, we are in the child process
     else if (pid == 0)
     {
-        
-        // execve is used to execute the command in the child process. returns (-1) only if there is an error
-        // execve takes in the path to the command, the arguments, and the environment variables (NULL in this case)
-        if (execve(command->argv[0], command->argv, NULL) == -1)
-        {
-            const char exec_error[] = "Error: Command execution failed.\n";
-            print_error(exec_error, my_strlen(exec_error));
-            
-            // using _exit wrapper to terminate the child process
-            _exit(1); 
-        }
+        run_child_process(command);
     }
+    // if pid > 0, we are in the parent process
     else
     {
-        // if pid > 0, we are in the parent process
-        // if background_status == 0, we wait for the child process to finish before returning to the prompt
-        if (command->background_status == 0)
-        {
-            int status;
-            waitpid(pid, &status, 0);
-        }
-        // if background_status == 1, we do not wait for the child process to finish and return to the prompt immediately
+        wait_for_foreground_process(pid, command);
     }
 }
