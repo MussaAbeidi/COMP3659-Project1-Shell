@@ -223,7 +223,7 @@ void wait_for_foreground_process(pid_t pid, struct Command *command)
 
 void run_command(struct Command *command)
 {
-    // Do not execute if command is empty
+    // if command is empty or the first argument is NULL, we do not execute anything
     if (command->argc == 0 || command->argv[0] == NULL)
     {
         return;
