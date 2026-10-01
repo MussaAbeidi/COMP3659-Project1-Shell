@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include "jobs.h"
+#include "parser.h"
 #include "myheap.h"
 #include "mystring.h"
 #include <sys/wait.h>
@@ -9,7 +10,7 @@ char buffer[BUFFER_SIZE];
 ssize_t bytes_read;
 char *tokens[MAX_TOKENS];
 int num_tokens;
-int pos;
+// int pos; parser has its own
 
 void reset_bytes_read()
 {
@@ -30,7 +31,7 @@ void read_input()
 
 void print_error(const char *message, int length)
 {
-    write(1, message, length);
+    write(2, message, length);
 }
 
 void flush_trailing_chars(){
@@ -104,20 +105,6 @@ int buffer_overflow_detected()
     return 0;
 }
 
-int check_trailing_ampersand()
-{
-    if(buffer[bytes_read - 1] == '&')
-    {
-        return 1;
-    }
-    return 0;
-}
-
-void remove_ampersand()
-{
-    buffer[bytes_read - 1] = '\0';
-}
-
 int tokenize_string()                                  /* CHANGED */
 {
     char *start = buffer;
@@ -165,37 +152,6 @@ int tokenize_string()                                  /* CHANGED */
     return 0;                                          /* removed the argv NULL line */
 }
 
-int get_command(struct Command *command)
-{
-    free_all(); 
-    reset_bytes_read();
-    // resetting the background status to 0 for each new command
-    command->background_status = 0;
-    print_prompt();
-    read_input();
-    if (check_read_error())
-    {
-        return READ_ERROR;
-    }
-    if(buffer_overflow_detected())
-    {
-        return BUFFER_OVERFLOW;
-    }
-    format_string();
-    if (check_exit_condition())
-    {
-        return EXIT;
-    }
-    if (check_trailing_ampersand())
-    {
-        command->background_status = 1;
-        remove_ampersand();
-    }
-    tokenize_string(command);
-
-    return 0;
-}
-
 void run_child_process(struct Command *command)
 {
     // execve is used to execute the command in the child process. returns (-1) only if there is an error
@@ -210,18 +166,19 @@ void run_child_process(struct Command *command)
     }
 }
 
-void wait_for_foreground_process(pid_t pid, struct Command *command)
+void wait_for_foreground_process(pid_t pid, int background) // changed
 {
     // if background_status == 0, we wait for the child process to finish before returning to the prompt
-    if (command->background_status == 0)
+    if (background == 0)    // changed
     {
         int status;
         waitpid(pid, &status, 0);
     }
-    // if background_status == 1, we do not wait for the child process to finish and return to the prompt immediately
+    // if background == 1, we do not wait and return to the prompt immediately
 }
 
-void run_command(struct Command *command)
+
+void run_command(struct Command *command, int background)   // changed
 {
     // if command is empty or the first argument is NULL, we do not execute anything
     if (command->argc == 0 || command->argv[0] == NULL)
@@ -246,21 +203,39 @@ void run_command(struct Command *command)
     // if pid > 0, we are in the parent process
     else
     {
-        wait_for_foreground_process(pid, command);
+        wait_for_foreground_process(pid, background);   //changed
     }
 }
 
-void get_job(struct Job *job)
-{
-  get_command(&job->pipeline[0]);
 
-  job->num_stages   = 1;
-  job->outfile_path = NULL;
-  job->infile_path  = NULL;
-  job->background   = 0;
+int get_job(struct Job *job)    // changed
+{
+    free_all();
+    reset_bytes_read();
+    print_prompt();
+    read_input();
+
+    if (check_read_error()){
+        return READ_ERROR;
+    }
+    if (buffer_overflow_detected()){
+        return BUFFER_OVERFLOW;
+    }
+    format_string();
+    if (check_exit_condition()){
+        return EXIT;
+    }
+    if (tokenize_string() != 0){
+        return HEAP_EXCEEDED;
+    }
+    if (num_tokens == 0){
+        return EMPTY_LINE;
+    }
+
+    return parse_job(job);
 }
 
 void run_job(struct Job *job)
 {
-  run_command(&job->pipeline[0]);
+  run_command(&job->pipeline[0], job->background);  // changed
 }

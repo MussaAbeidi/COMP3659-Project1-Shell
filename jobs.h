@@ -10,12 +10,14 @@
 #define HEAP_EXCEEDED 4
 #define MAX_PIPELINE_LEN 2
 #define MAX_TOKENS 64
+#define PARSE_ERROR 10
+#define EMPTY_LINE  11
 
 struct Command
 {
   char *argv[MAX_ARGS+1];
   unsigned int argc;
-  unsigned int background_status;
+  // unsigned int background_status;
 };
 
 
@@ -28,10 +30,10 @@ struct Job
   int background;       /* 0 = foreground */
 };
 
-int get_command(struct Command *command);
-void run_command(struct Command *command);
+// int get_command(struct Command *command);
+void run_command(struct Command *command, int background);  // changed
 void run_child_process(struct Command *command);
-void wait_for_foreground_process(pid_t pid, struct Command *command);
+void wait_for_foreground_process(pid_t pid, int background); // changed
 void print_prompt();
 void read_input();
 void print_error(const char *message, int length);
@@ -44,7 +46,7 @@ int buffer_overflow();
 void format_string();
 int buffer_overflow_detected();
 int tokenize_string();
-void get_job(struct Job *job);
+int get_job(struct Job *job);
 void run_job(struct Job *job);
 
 #endif
