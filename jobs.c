@@ -252,9 +252,9 @@ void run_command(struct Command *command)
 
 void get_job(struct Job *job)
 {
-  get_command(&job->pipeline[0]);   /* read one command, as before */
+  get_command(&job->pipeline[0]);
 
-  job->num_stages   = 1;            /* a one-stage pipeline */
+  job->num_stages   = 1;
   job->outfile_path = NULL;
   job->infile_path  = NULL;
   job->background   = 0;

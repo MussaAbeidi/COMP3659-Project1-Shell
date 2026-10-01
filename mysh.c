@@ -10,10 +10,8 @@ int main(int argc, char *argv[], char *envp[])
 
   while (!exitShell)
     {
-      /* prompt for and read command line */
       int status = get_job(&job);
 
-      /* process command line */
       if (status == EXIT)
         {
           exitShell = 1;
@@ -27,7 +25,6 @@ int main(int argc, char *argv[], char *envp[])
         {
           run_job(&job);
         }
-      /* BUFFER_OVERFLOW: do nothing, loop prompts again */
     }
 
   return exitCode;
