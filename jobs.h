@@ -8,12 +8,23 @@
 #define READ_ERROR 1
 #define EXIT 3
 #define HEAP_EXCEEDED 4
+#define MAX_PIPELINE_LEN 2
 
 struct Command
 {
   char *argv[MAX_ARGS+1];
   unsigned int argc;
   unsigned int background_status;
+};
+
+
+struct Job
+{
+  struct Command pipeline[MAX_PIPELINE_LEN];
+  unsigned int num_stages;
+  char *outfile_path;   /* NULL if no > */
+  char *infile_path;    /* NULL if no < */
+  int background;       /* 0 = foreground */
 };
 
 int get_command(struct Command *command);
@@ -32,6 +43,7 @@ int buffer_overflow();
 void format_string();
 int buffer_overflow_detected();
 int tokenize_string(struct Command *command);
-
+void get_job(struct Job *job);
+void run_job(struct Job *job);
 
 #endif

@@ -249,3 +249,18 @@ void run_command(struct Command *command)
         wait_for_foreground_process(pid, command);
     }
 }
+
+void get_job(struct Job *job)
+{
+  get_command(&job->pipeline[0]);   /* read one command, as before */
+
+  job->num_stages   = 1;            /* a one-stage pipeline */
+  job->outfile_path = NULL;
+  job->infile_path  = NULL;
+  job->background   = 0;
+}
+
+void run_job(struct Job *job)
+{
+  run_command(&job->pipeline[0]);
+}
