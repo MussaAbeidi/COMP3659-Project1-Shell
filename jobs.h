@@ -9,6 +9,7 @@
 #define EXIT 3
 #define HEAP_EXCEEDED 4
 #define MAX_PIPELINE_LEN 2
+#define MAX_TOKENS 64
 
 struct Command
 {
@@ -42,7 +43,7 @@ int check_exit_condition();
 int buffer_overflow();
 void format_string();
 int buffer_overflow_detected();
-int tokenize_string(struct Command *command);
+int tokenize_string();
 void get_job(struct Job *job);
 void run_job(struct Job *job);
 

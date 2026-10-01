@@ -7,6 +7,9 @@
 const char error_message[] = "Error: Command line exceeds maximum length (255) allowed.\n";
 char buffer[BUFFER_SIZE];
 ssize_t bytes_read;
+char *tokens[MAX_TOKENS];
+int num_tokens;
+int pos;
 
 void reset_bytes_read()
 {
@@ -115,11 +118,11 @@ void remove_ampersand()
     buffer[bytes_read - 1] = '\0';
 }
 
-int tokenize_string(struct Command *command)
+int tokenize_string()                                  /* CHANGED */
 {
     char *start = buffer;
     char *end;
-    command->argc = 0;
+    num_tokens = 0;                                    /* CHANGED */
 
     // Skip over leading whitespace
     while(*start && (*start == ' ' || *start == '\t'))
@@ -128,10 +131,10 @@ int tokenize_string(struct Command *command)
     }
     // Empty string inputted
     if (!*start) {
-        command->argc = 0;
+        num_tokens = 0;                                /* CHANGED */
         return 0;
     }
-    while(*start && (command->argc) < MAX_ARGS)
+    while(*start && num_tokens < MAX_TOKENS)           /* CHANGED */
     {
         end = start;
         while (*end && (*end != ' ' && *end != '\t')) 
@@ -151,18 +154,15 @@ int tokenize_string(struct Command *command)
         my_strcpy(start, token);
         *end = temp;
         start = end;
-        
-        command->argv[command->argc] = token;
-        command->argc++;
+        tokens[num_tokens] = token;                    /* CHANGED */
+        num_tokens++;                                  /* CHANGED */
         while (*start && (*start == ' ' || *start == '\t')) 
         {
             start++;
         }
 
     }
-    
-    command->argv[command->argc] = NULL;
-    return 0;
+    return 0;                                          /* removed the argv NULL line */
 }
 
 int get_command(struct Command *command)

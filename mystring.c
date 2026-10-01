@@ -44,7 +44,7 @@ char *my_strcpy(const char *src_string, char *dest_string)
     return start_address;
 }
 
-char *my_strcat(char *dest, const char *src)
+char *my_strcat(char *src, const char *dest)
 {
   char *d = dest;
 
