@@ -17,6 +17,6 @@ parser.o: parser.c parser.h jobs.h mystring.h
 	gcc -c parser.c
 
 clean:
-	/usr/bin/rm -f *.o mysh
+	rm -f *.o mysh
 
 all: clean mysh

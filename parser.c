@@ -70,11 +70,11 @@ int parse_pipeline(struct Job *job)
 int parse_filename(char **path)
 {
     pos++;              /* skip the < or > */
-    if (pos >= num_toks|| is_special(toks[pos]))
+    if (pos >= num_tokens|| is_special(tokens[pos]))
     {
         return parse_error("Error: missing file name after < or >.\n");
     }
-    *path = toks[pos];
+    *path = tokens[pos];
     pos++;
     return 0;
 }
