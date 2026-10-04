@@ -4,6 +4,7 @@
 #define JOBS_H
 #define MAX_ARGS 20
 #define BUFFER_SIZE 257
+#define PATH_LEN 256
 #define BUFFER_OVERFLOW 2
 #define READ_ERROR 1
 #define EXIT 3

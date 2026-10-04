@@ -44,7 +44,7 @@ char *my_strcpy(const char *src_string, char *dest_string)
     return start_address;
 }
 
-char *my_strcat(char *src, const char *dest)
+char *my_strcat(char *dest, const char *src)
 {
   char *d = dest;
 
@@ -61,4 +61,17 @@ char *my_strcat(char *src, const char *dest)
   *d = '\0';
 
   return dest;
+}
+
+int has_slash(const char *str)
+{
+    while (*str) 
+    {
+        if (*str == '/') 
+        {
+            return 1;  /* a slash was found*/
+        }
+        str++;
+    }
+    return 0;  /* there was no slash found */
 }
