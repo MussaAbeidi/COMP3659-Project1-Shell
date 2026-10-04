@@ -31,9 +31,7 @@ struct Job
 };
 
 // int get_command(struct Command *command);
-void run_command(struct Command *command, int background);  // changed
 void run_child_process(struct Command *command);
-void wait_for_foreground_process(pid_t pid, int background); // changed
 void print_prompt();
 void read_input();
 void print_error(const char *message, int length);
@@ -48,5 +46,6 @@ int buffer_overflow_detected();
 int tokenize_string();
 int get_job(struct Job *job);
 void run_job(struct Job *job);
+pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd);
 
 #endif
