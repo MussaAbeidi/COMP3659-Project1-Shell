@@ -1,12 +1,17 @@
 #include <unistd.h>
 #include "jobs.h"
+#include "parser.h"
 #include "myheap.h"
 #include "mystring.h"
 #include <sys/wait.h>
+#include <fcntl.h>
 
 const char error_message[] = "Error: Command line exceeds maximum length (255) allowed.\n";
 char buffer[BUFFER_SIZE];
 ssize_t bytes_read;
+char *tokens[MAX_TOKENS];
+int num_tokens;
+// int pos; parser has its own
 
 void reset_bytes_read()
 {
@@ -27,7 +32,7 @@ void read_input()
 
 void print_error(const char *message, int length)
 {
-    write(1, message, length);
+    write(2, message, length);
 }
 
 void flush_trailing_chars(){
@@ -101,25 +106,11 @@ int buffer_overflow_detected()
     return 0;
 }
 
-int check_trailing_ampersand()
-{
-    if(buffer[bytes_read - 1] == '&')
-    {
-        return 1;
-    }
-    return 0;
-}
-
-void remove_ampersand()
-{
-    buffer[bytes_read - 1] = '\0';
-}
-
-int tokenize_string(struct Command *command)
+int tokenize_string()                                  /* CHANGED */
 {
     char *start = buffer;
     char *end;
-    command->argc = 0;
+    num_tokens = 0;                                    /* CHANGED */
 
     // Skip over leading whitespace
     while(*start && (*start == ' ' || *start == '\t'))
@@ -128,10 +119,10 @@ int tokenize_string(struct Command *command)
     }
     // Empty string inputted
     if (!*start) {
-        command->argc = 0;
+        num_tokens = 0;                                /* CHANGED */
         return 0;
     }
-    while(*start && (command->argc) < MAX_ARGS)
+    while(*start && num_tokens < MAX_TOKENS)           /* CHANGED */
     {
         end = start;
         while (*end && (*end != ' ' && *end != '\t')) 
@@ -151,101 +142,199 @@ int tokenize_string(struct Command *command)
         my_strcpy(start, token);
         *end = temp;
         start = end;
-        
-        command->argv[command->argc] = token;
-        command->argc++;
+        tokens[num_tokens] = token;                    /* CHANGED */
+        num_tokens++;                                  /* CHANGED */
         while (*start && (*start == ' ' || *start == '\t')) 
         {
             start++;
         }
 
     }
-    
-    command->argv[command->argc] = NULL;
-    return 0;
+    return 0;                                          /* removed the argv NULL line */
 }
 
-int get_command(struct Command *command)
+/* Runs in the child: builds the program's path and execs it */
+void run_child_process(struct Command *command)
 {
-    free_all(); 
+    char path[PATH_LEN];
+
+    if (has_slash(command->argv[0]))
+    {
+        my_strcpy(command->argv[0], path);          /* already a path: use it as-is */
+    }
+    else
+    {
+        my_strcpy("/usr/bin/", path);               /* "ls" becomes "/usr/bin/ls" */
+        my_strcat(path, command->argv[0]);
+    }
+
+    execve(path, command->argv, NULL);
+
+    /* only reached if execve failed */
+    const char exec_error[] = "Error: Command execution failed.\n";
+    print_error(exec_error, my_strlen(exec_error));
+    _exit(1);
+}
+
+
+int get_job(struct Job *job)    // changed
+{
+    free_all();
     reset_bytes_read();
-    // resetting the background status to 0 for each new command
-    command->background_status = 0;
     print_prompt();
     read_input();
+
     if (check_read_error())
     {
         return READ_ERROR;
     }
-    if(buffer_overflow_detected())
+    if (buffer_overflow_detected())
     {
         return BUFFER_OVERFLOW;
     }
+
     format_string();
+
     if (check_exit_condition())
     {
         return EXIT;
     }
-    if (check_trailing_ampersand())
+    if (tokenize_string() != 0)
     {
-        command->background_status = 1;
-        remove_ampersand();
+        return HEAP_EXCEEDED;
     }
-    tokenize_string(command);
+    if (num_tokens == 0)
+    {
+        return EMPTY_LINE;
+    }
 
-    return 0;
+    return parse_job(job);
 }
 
-void run_child_process(struct Command *command)
+void run_job(struct Job *job)
 {
-    // execve is used to execute the command in the child process. returns (-1) only if there is an error
-    // execve takes in the path to the command, the arguments, and the environment variables (NULL in this case)
-    if (execve(command->argv[0], command->argv, NULL) == -1)
+    pid_t pids[MAX_PIPELINE_LEN];
+    unsigned int started = 0;
+    unsigned int i;
+    int in_fd = 0;          /* input for the current stage (0 = keyboard) */
+    int out_fd;             /* output for the current stage */
+    int next_in_fd;         /* pipe read end, saved for the next stage */
+    int fds[2];
+
+    /* < : the first stage reads from the input file */
+    if (job->infile_path != NULL)
     {
-        const char exec_error[] = "Error: Command execution failed.\n";
-        print_error(exec_error, my_strlen(exec_error));
-        
-        // using _exit wrapper to terminate the child process safely
-        _exit(1); 
+        in_fd = open(job->infile_path, O_RDONLY);
+        if (in_fd < 0)
+        {
+            const char in_error[] = "Error: cannot open input file.\n";
+            print_error(in_error, my_strlen(in_error));
+            return;
+        }
+    }
+
+    for (i = 0; i < job->num_stages; i++)
+    {
+        next_in_fd = -1;
+
+        if (i < job->num_stages - 1)
+        {
+            /* not the last stage: output goes into a new pipe */
+            if (pipe(fds) < 0)
+            {
+                const char pipe_error[] = "Error: cannot create pipe.\n";
+                print_error(pipe_error, my_strlen(pipe_error));
+                break;
+            }
+            out_fd = fds[1];            /* this stage writes into the pipe */
+            next_in_fd = fds[0];        /* the next stage will read from it */
+        }
+        else if (job->outfile_path != NULL)
+        {
+            /* > : last stage writes to the output file (create it, or empty it) */
+            out_fd = open(job->outfile_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (out_fd < 0)
+            {
+                const char out_error[] = "Error: cannot open output file.\n";
+                print_error(out_error, my_strlen(out_error));
+                break;
+            }
+        }
+        else
+        {
+            out_fd = 1;                 /* last stage, no > : output to the screen */
+        }
+
+        pids[started] = spawn(&job->pipeline[i], in_fd, out_fd, next_in_fd);
+        if (pids[started] > 0)
+        {
+            started++;
+        }
+
+        /* the shell doesn't need these any more, so close them */
+        if (in_fd != 0)
+        {
+            close(in_fd);
+        }
+        if (out_fd != 1)
+        {
+            close(out_fd);
+        }
+
+        in_fd = next_in_fd;             /* next stage reads from the pipe */
+    }
+
+    if (in_fd > 0)                      /* left open only if the loop stopped early */
+    {
+        close(in_fd);
+    }
+
+    /* & : only wait for the children if this is a foreground job */
+    if (job->background == 0)
+    {
+        for (i = 0; i < started; i++)
+        {
+            waitpid(pids[i], NULL, 0);
+        }
     }
 }
 
-void wait_for_foreground_process(pid_t pid, struct Command *command)
+/*
+ * Forks a child to run one command.
+ *   in_fd:     what the child should use as standard input  (0 = keyboard as normal)
+ *   out_fd:    what the child should use as standard output (1 = screen as normal)
+ *   unused_fd: a pipe end the child must close, or -1 if none
+ * Returns the child's pid, or -1 if fork failed. Does NOT wait.
+ */
+pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd)
 {
-    // if background_status == 0, we wait for the child process to finish before returning to the prompt
-    if (command->background_status == 0)
-    {
-        int status;
-        waitpid(pid, &status, 0);
-    }
-    // if background_status == 1, we do not wait for the child process to finish and return to the prompt immediately
-}
-
-void run_command(struct Command *command)
-{
-    // if command is empty or the first argument is NULL, we do not execute anything
-    if (command->argc == 0 || command->argv[0] == NULL)
-    {
-        return;
-    }
-    
     pid_t pid = fork();
 
-    // if pid < 0, then fork failed
     if (pid < 0)
     {
-        // printing an error message to the user if the fork failed
         const char fork_error[] = "Error: Failed to spawn child process.\n";
         print_error(fork_error, my_strlen(fork_error));
+        return -1;
     }
-    // if pid is equal to 0, we are in the child process
-    else if (pid == 0)
+
+    if (pid == 0)                       /* child */
     {
+        if (in_fd != 0)
+        {
+            dup2(in_fd, 0);             /* standard input now comes from in_fd */
+            close(in_fd);
+        }
+        if (out_fd != 1)
+        {
+            dup2(out_fd, 1);            /* standard output now goes to out_fd */
+            close(out_fd);
+        }
+        if (unused_fd != -1)
+        {
+            close(unused_fd);           /* close the pipe end this child doesn't use */
+        }
         run_child_process(command);
     }
-    // if pid > 0, we are in the parent process
-    else
-    {
-        wait_for_foreground_process(pid, command);
-    }
+
+    return pid;                         /* parent */
 }

@@ -1,5 +1,5 @@
-mysh: mysh.o mystring.o myheap.o jobs.o
-	gcc mysh.o mystring.o myheap.o jobs.o -o mysh
+mysh: mysh.o mystring.o myheap.o jobs.o parser.o
+	gcc mysh.o mystring.o myheap.o jobs.o parser.o -o mysh
 
 mysh.o: mysh.c mystring.h jobs.h
 	gcc -c mysh.c
@@ -10,10 +10,13 @@ mystring.o: mystring.c mystring.h
 myheap.o: myheap.c myheap.h
 	gcc -c myheap.c
 
-jobs.o: jobs.c mystring.h jobs.h myheap.h 
+jobs.o: jobs.c mystring.h jobs.h myheap.h parser.h                    
 	gcc -c jobs.c
 
-clean:
-	/usr/bin/rm -f *.o mysh
+parser.o: parser.c parser.h jobs.h mystring.h 
+	gcc -c parser.c
 
-all: clean mysh 
+clean:
+	rm -f *.o mysh
+
+all: clean mysh
