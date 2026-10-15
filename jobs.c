@@ -1,10 +1,12 @@
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <signal.h>
 #include "jobs.h"
 #include "parser.h"
 #include "myheap.h"
 #include "mystring.h"
-#include <sys/wait.h>
-#include <fcntl.h>
+
 
 const char error_message[] = "Error: Command line exceeds maximum length (255) allowed.\n";
 char buffer[BUFFER_SIZE];
@@ -153,24 +155,61 @@ int tokenize_string()                                  /* CHANGED */
     return 0;                                          /* removed the argv NULL line */
 }
 
-/* Runs in the child: builds the program's path and execs it */
-void run_child_process(struct Command *command)
+/* Run a child process */
+void run_child_process(struct Command *command, char *envp[])
 {
     char path[PATH_LEN];
-
+    /* handling the case where the command contains a slash */
     if (has_slash(command->argv[0]))
     {
-        my_strcpy(command->argv[0], path);          /* already a path: use it as-is */
+        my_strcpy(command->argv[0], path);
+        execve(path, command->argv, envp);
     }
     else
     {
-        my_strcpy("/usr/bin/", path);               /* "ls" becomes "/usr/bin/ls" */
-        my_strcat(path, command->argv[0]);
+        /* searching for the executable in the PATH directories */
+        char *path_env = my_getenv("PATH", envp);
+        if (!path_env)
+        {
+            /* Set a default PATH if not found */
+            path_env = "/bin:/usr/bin:/usr/local/bin";
+        }
+        char path_buf[1024];
+        my_strcpy(path_env, path_buf);
+
+        char *dir = path_buf;
+        char *next_dir;
+        /* while there are more directories in the PATH */
+        while (dir && *dir)
+        {
+            next_dir = NULL;
+            char *p = dir;
+            /* parsing each directory in the PATH */
+            while (*p)
+            {
+                if (*p == ':')
+                {
+                    *p = '\0';
+                    next_dir = p + 1;
+                    break;
+                }
+                p++;
+            }
+            /* creating the full path to the executable */
+            path[0] = '\0';
+            my_strcpy(dir, path);
+            my_strcat(path, "/");
+            my_strcat(path, command->argv[0]);
+            /* checking if the executable is accessible */
+            if (access(path, X_OK) == 0)
+            {
+                execve(path, command->argv, envp);
+            }
+            /* move to the next directory in the PATH */
+            dir = next_dir;
+        }
     }
 
-    execve(path, command->argv, NULL);
-
-    /* only reached if execve failed */
     const char exec_error[] = "Error: Command execution failed.\n";
     print_error(exec_error, my_strlen(exec_error));
     _exit(1);
@@ -181,6 +220,7 @@ int get_job(struct Job *job)    // changed
 {
     free_all();
     reset_bytes_read();
+    cleanup_zombies();
     print_prompt();
     read_input();
 
@@ -211,8 +251,24 @@ int get_job(struct Job *job)    // changed
     return parse_job(job);
 }
 
-void run_job(struct Job *job)
+void run_job(struct Job *job, char *envp[])
 {
+    /* handling the 'cd' command internally */
+    if (my_strcmp(job->pipeline[0].argv[0], "cd") == 0)
+    {
+        const char *target_dir = job->pipeline[0].argv[1];
+        if (!target_dir)
+        {
+            target_dir = my_getenv("HOME", envp); /* we assume the user wants to go to their home directory */
+        }
+        if (target_dir && chdir(target_dir) != 0)
+        {
+            const char cd_error[] = "Error: cd failed.\n";
+            print_error(cd_error, my_strlen(cd_error));
+        }
+        return;
+    }
+
     pid_t pids[MAX_PIPELINE_LEN];
     unsigned int started = 0;
     unsigned int i;
@@ -265,7 +321,7 @@ void run_job(struct Job *job)
             out_fd = 1;                 /* last stage, no > : output to the screen */
         }
 
-        pids[started] = spawn(&job->pipeline[i], in_fd, out_fd, next_in_fd);
+        pids[started] = spawn(&job->pipeline[i], in_fd, out_fd, next_in_fd, envp);
         if (pids[started] > 0)
         {
             started++;
@@ -306,7 +362,7 @@ void run_job(struct Job *job)
  *   unused_fd: a pipe end the child must close, or -1 if none
  * Returns the child's pid, or -1 if fork failed. Does NOT wait.
  */
-pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd)
+pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd, char *envp[])
 {
     pid_t pid = fork();
 
@@ -319,6 +375,8 @@ pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd)
 
     if (pid == 0)                       /* child */
     {
+        /* restoring the default signal handler in the child process */
+        signal(SIGINT, SIG_DFL);
         if (in_fd != 0)
         {
             dup2(in_fd, 0);             /* standard input now comes from in_fd */
@@ -333,8 +391,16 @@ pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd)
         {
             close(unused_fd);           /* close the pipe end this child doesn't use */
         }
-        run_child_process(command);
+        run_child_process(command,envp);
     }
 
     return pid;                         /* parent */
+}
+
+void cleanup_zombies(void)
+{
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+    {
+        /* cleanup zombies */
+    }
 }
