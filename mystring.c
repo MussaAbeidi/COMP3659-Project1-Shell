@@ -75,3 +75,40 @@ int has_slash(const char *str)
     }
     return 0;  /* there was no slash found */
 }
+
+/* check if the string starts with the given prefix */
+int starts_with(const char *str, const char *prefix)
+{
+    while (*prefix)
+    {
+        if (*str != *prefix)
+        {
+            return 0;
+        }
+        str++;
+        prefix++;
+    }
+    return 1;
+}
+
+/* getting the environment variable value */
+char *my_getenv(const char *name, char *envp[])
+{
+    if (!envp)
+    {
+        return NULL;
+    }
+
+    char prefix[64];
+    my_strcpy(name, prefix);
+    my_strcat(prefix, "=");
+
+    for (int i = 0; envp[i] != NULL; i++)
+    {
+        if (starts_with(envp[i], prefix))
+        {
+            return envp[i] + my_strlen(prefix);
+        }
+    }
+    return NULL;
+}
