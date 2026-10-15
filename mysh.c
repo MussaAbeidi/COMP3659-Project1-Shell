@@ -3,10 +3,11 @@
 #include "mystring.h"
 #include "jobs.h"
 
+/* signal handling for SIGINT*/
 void sigint_handler(int sig)
 {
     (void)sig;
-    write(1, "\n", 1);
+    write(1, "\n", 1); /* going to a new line */
 }
 
 int main(int argc, char *argv[], char *envp[])
