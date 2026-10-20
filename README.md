@@ -22,7 +22,7 @@
 | **Group Self-enrolment** | Sept 14, 6:00 PM | All group members must join the same group on D2L | <p align="center">✓</p> |
 | **Contract & Development History Bonus** | Sept 17, end of day | Submit the team contract and share the GitHub repository with the | <p align="center">✓</p>| professor to achieve a 0.15% bonus added to our final grade |<p align="center">✓</p> |
 | **Project Submission** | Oct 8, 11:59 PM | Submission of all project deliverables | <p align="center">✓</p>|
-| **Presentation** | Oct 19 - 30 | Deliver a ~20 minute presentation of our project (functionality, limitations, etc) | <p align="center">✓</p>|
+| **Presentation** | Oct 19 - 30 | Deliver a ~20 minute presentation of our project (functionality, limitations, etc) | 
 
 ### Tentative Development Timeline
 <small>Last Updated: 10/19/2026</small>
