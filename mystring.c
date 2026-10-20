@@ -94,7 +94,7 @@ int starts_with(const char *str, const char *prefix)
 /* getting the environment variable value */
 char *my_getenv(const char *name, char *envp[])
 {
-    if (!envp)
+    if (!envp || my_strlen(name) > 62)
     {
         return NULL;
     }

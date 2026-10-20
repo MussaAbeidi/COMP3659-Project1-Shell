@@ -2,6 +2,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <errno.h>
 #include "jobs.h"
 #include "parser.h"
 #include "myheap.h"
@@ -13,7 +14,7 @@ char buffer[BUFFER_SIZE];
 ssize_t bytes_read;
 char *tokens[MAX_TOKENS];
 int num_tokens;
-// int pos; parser has its own
+pid_t saved_pgid = 0; /* to store the process group ID */
 
 void reset_bytes_read()
 {
@@ -44,22 +45,21 @@ void flush_trailing_chars(){
     }
 }
 
-void echo_bytes(ssize_t bytes_read)
-{
-    write(1, buffer, bytes_read);
-    write(1, "\n", 1);
-}
-
 void echo_error()
 {
-    write(1, error_message, my_strlen(error_message));
+    write(2, error_message, my_strlen(error_message));
 }
 
 int check_read_error()
 {
-    // Terminating the program read system call failure if bytes_read euqal to -1 so the shell will not crash
+    // terminating the program if bytes_read is -1, which indicates an error occurred during the read operation
     if (bytes_read == -1)
-    {   //printf("Bytes read: %i\n", bytes_read);
+    {   
+        // if ctrl + C interrupted read, it's not a real crash
+        if (errno == EINTR)
+        {
+            return 2;
+        }
         return 1;
     }
     return 0;
@@ -67,7 +67,7 @@ int check_read_error()
 
 int check_exit_condition()
 {
-    if (my_strcmp(buffer, "exit") == 0)
+    if (num_tokens == 1 && my_strcmp(tokens[0], "exit") == 0)
     {
         return 1;
     }    
@@ -108,11 +108,17 @@ int buffer_overflow_detected()
     return 0;
 }
 
-int tokenize_string()                                  /* CHANGED */
+/*For handling ctrl + D after an empty input*/
+int check_end_of_input()
+{
+    return bytes_read == 0;
+}
+
+int tokenize_string(char *envp[])                                  
 {
     char *start = buffer;
     char *end;
-    num_tokens = 0;                                    /* CHANGED */
+    num_tokens = 0;                                  
 
     // Skip over leading whitespace
     while(*start && (*start == ' ' || *start == '\t'))
@@ -120,28 +126,50 @@ int tokenize_string()                                  /* CHANGED */
         start++;
     }
     // Empty string inputted
-    if (!*start) {
-        num_tokens = 0;                                /* CHANGED */
+    if (!*start) 
+    {
+        num_tokens = 0;                                
         return 0;
     }
-    while(*start && num_tokens < MAX_TOKENS)           /* CHANGED */
+    while(*start && num_tokens < MAX_TOKENS)     
     {
         end = start;
         while (*end && (*end != ' ' && *end != '\t')) 
         {
             end++;
         }
-        int token_length = end - start;
-        char *token = alloc(token_length + 1);
-        // Trying to exceed heap limit
-        if (token == NULL)
-        {
-            return HEAP_EXCEEDED;
-        }
+        
         char temp = *end;
         *end = '\0';
 
-        my_strcpy(start, token);
+        char *word_to_copy = start;
+        /* if token starts with $, look up the environment variable */
+        if (start[0] == '$' && start[1] != '\0')
+        {
+            char *env_val = my_getenv(start + 1, envp);
+            if (env_val != NULL)
+            {
+                word_to_copy = env_val;
+            }
+            else
+            {
+                word_to_copy = "";
+            }
+        }
+
+        int token_length = my_strlen(word_to_copy);
+        char *token = alloc(token_length + 1);
+
+        // Trying to exceed heap limit
+        if (token == NULL)
+        {
+            *end = temp;
+            const char heap_err[] = "Error: Heap limit exceeded.\n";
+            print_error(heap_err, my_strlen(heap_err));
+            return HEAP_EXCEEDED;
+        }
+
+        my_strcpy(word_to_copy, token);
         *end = temp;
         start = end;
         tokens[num_tokens] = token;                    /* CHANGED */
@@ -150,8 +178,15 @@ int tokenize_string()                                  /* CHANGED */
         {
             start++;
         }
-
     }
+    /* if there are more characters in the buffer, the user has then typed too many tokens*/
+    if (*start != '\0')
+    {
+        const char tok_err[] = "Error: too many tokens.\n";
+        print_error(tok_err, my_strlen(tok_err));
+        return HEAP_EXCEEDED;
+    }
+    
     return 0;                                          /* removed the argv NULL line */
 }
 
@@ -180,7 +215,7 @@ void run_child_process(struct Command *command, char *envp[])
         char *dir = path_buf;
         char *next_dir;
         /* while there are more directories in the PATH */
-        while (dir && *dir)
+        while (dir != NULL && *dir != '\0')
         {
             next_dir = NULL;
             char *p = dir;
@@ -195,7 +230,7 @@ void run_child_process(struct Command *command, char *envp[])
                 }
                 p++;
             }
-            /* creating the full path to the executable */
+            /* creating the full path to the executable*/
             path[0] = '\0';
             my_strcpy(dir, path);
             my_strcat(path, "/");
@@ -215,8 +250,21 @@ void run_child_process(struct Command *command, char *envp[])
     _exit(1);
 }
 
+/* signal handling for ctrl + C*/
+void sigint_handler(int sig)
+{
+    (void)sig;
+    const char *stop_msg = "-->mysh(task ended)\n";
+	write(2, stop_msg, my_strlen(stop_msg)); 
+}
 
-int get_job(struct Job *job)    // changed
+void sigchild_handler(int sig)
+{
+    (void)sig;
+    cleanup_zombies();
+}
+
+int get_job(struct Job *job, char *envp[])    // changed
 {
     free_all();
     reset_bytes_read();
@@ -224,16 +272,20 @@ int get_job(struct Job *job)    // changed
     print_prompt();
     read_input();
 
-        if (check_read_error())
+    if (check_read_error() == 2) /* ctrl + C was pressed at the prompt */
+    {
+        return EMPTY_LINE;
+    }
+    if (check_read_error() == 1)
     {
         return READ_ERROR;
     }
-    
-    if (bytes_read == 0)    /* Ctrl+D or end of input: nothing was read */
+    if (check_end_of_input()) /*if ctrl + D is pressed after no input*/
     {
         write(1, "\n", 1);
         return EXIT;
     }
+
     if (buffer_overflow_detected())
     {
         return BUFFER_OVERFLOW;
@@ -241,11 +293,7 @@ int get_job(struct Job *job)    // changed
 
     format_string();
 
-    if (check_exit_condition())
-    {
-        return EXIT;
-    }
-    if (tokenize_string() != 0)
+    if (tokenize_string(envp) != 0)
     {
         return HEAP_EXCEEDED;
     }
@@ -253,9 +301,14 @@ int get_job(struct Job *job)    // changed
     {
         return EMPTY_LINE;
     }
+    if (check_exit_condition())
+    {
+        return EXIT;
+    }
 
     return parse_job(job);
 }
+
 
 void run_job(struct Job *job, char *envp[])
 {
@@ -267,13 +320,60 @@ void run_job(struct Job *job, char *envp[])
         {
             target_dir = my_getenv("HOME", envp); /* we assume the user wants to go to their home directory */
         }
-        if (target_dir && chdir(target_dir) != 0)
+        if (target_dir && chdir(target_dir) != 0) /*tries to enter home directory*/
         {
             const char cd_error[] = "Error: cd failed.\n";
             print_error(cd_error, my_strlen(cd_error));
         }
         return;
     }
+
+    /* handling the 'fg' command internally to resume a stopped/background job in foreground */
+    if (my_strcmp(job->pipeline[0].argv[0], "fg") == 0)
+    {
+        if (saved_pgid <= 0)
+        {
+            const char fg_err[] = "Error: no job to bring to foreground.\n";
+            print_error(fg_err, my_strlen(fg_err));
+            return;
+        }
+        signal(SIGCHLD, SIG_DFL);
+        tcsetpgrp(0, saved_pgid);       /* give terminal to the job */
+        kill(-saved_pgid, SIGCONT);     /* wake up the process group */
+
+        int status = 0;
+        while (waitpid(-saved_pgid, &status, WUNTRACED) > 0)
+        {
+            if (WIFSTOPPED(status))
+            {
+                const char *suspend_msg = "\n-->mysh(task suspended)\n";
+                write(2, suspend_msg, my_strlen(suspend_msg));
+                break;
+            }
+        }
+        if (!WIFSTOPPED(status))
+        {
+            saved_pgid = 0;             /* job finished */
+        }
+        tcsetpgrp(0, getpgrp());        /* give terminal back to mysh */
+        signal(SIGCHLD, sigchild_handler);
+        return;
+    }
+
+    /* handling the 'bg' command internally to resume a stopped job and beings running it in the background */
+    if (my_strcmp(job->pipeline[0].argv[0], "bg") == 0)
+    {
+        if (saved_pgid <= 0)
+        {
+            const char bg_err[] = "Error: no job to resume in background.\n";
+            print_error(bg_err, my_strlen(bg_err));
+            return;
+        }
+        kill(-saved_pgid, SIGCONT);     /* wake up the process group in background */
+        return;
+    }
+
+
 
     pid_t pids[MAX_PIPELINE_LEN];
     unsigned int started = 0;
@@ -282,6 +382,8 @@ void run_job(struct Job *job, char *envp[])
     int out_fd;             /* output for the current stage */
     int next_in_fd;         /* pipe read end, saved for the next stage */
     int fds[2];
+
+    int group = 0; /* starts a new process group for every job */
 
     /* < : the first stage reads from the input file */
     if (job->infile_path != NULL)
@@ -294,6 +396,9 @@ void run_job(struct Job *job, char *envp[])
             return;
         }
     }
+
+    /* turn off the sigchild handler while waiting so it does not steal foreground status */
+    signal(SIGCHLD, SIG_DFL);
 
     for (i = 0; i < job->num_stages; i++)
     {
@@ -313,8 +418,15 @@ void run_job(struct Job *job, char *envp[])
         }
         else if (job->outfile_path != NULL)
         {
-            /* > : last stage writes to the output file (create it, or empty it) */
-            out_fd = open(job->outfile_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            /* > or >> : last stage writes to the output file */
+            if (job->append == 1)
+            {
+                out_fd = open(job->outfile_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+            }
+            else
+            {
+                out_fd = open(job->outfile_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            }
             if (out_fd < 0)
             {
                 const char out_error[] = "Error: cannot open output file.\n";
@@ -327,9 +439,17 @@ void run_job(struct Job *job, char *envp[])
             out_fd = 1;                 /* last stage, no > : output to the screen */
         }
 
-        pids[started] = spawn(&job->pipeline[i], in_fd, out_fd, next_in_fd, envp);
+        pids[started] = spawn(&job->pipeline[i], in_fd, out_fd, next_in_fd, group, envp);
         if (pids[started] > 0)
         {
+            if(group == 0)
+            {
+                group = pids[started];
+            }
+            if(group > 0)
+            {
+                setpgid(pids[started], group); /* set in parent as well to avoid a race condition*/
+            }
             started++;
         }
 
@@ -352,13 +472,30 @@ void run_job(struct Job *job, char *envp[])
     }
 
     /* & : only wait for the children if this is a foreground job */
-    if (job->background == 0)
+    if (job->background == 0 && started > 0)
     {
+        tcsetpgrp(0, group); /* give terminal to the job */
+        int status = 0;
         for (i = 0; i < started; i++)
         {
-            waitpid(pids[i], NULL, 0);
+            status = 0;
+            waitpid(pids[i], &status, WUNTRACED);
+            if (WIFSTOPPED(status))
+            {
+                saved_pgid = group; /* saving the group ID so that the fg command can use it to resume it*/
+                const char *suspend_msg = "\n-->mysh(task suspended)\n";
+                write(2, suspend_msg, my_strlen(suspend_msg));
+            }
         }
+        tcsetpgrp(0, getpgrp()); /* return terminal control back to mysh */
     }
+    else if (job->background == 1 && started > 0)
+    {
+        saved_pgid = group; /* saving the background job group id */
+    }
+
+    /* turning the sigchild back on for zombies*/
+    signal(SIGCHLD, sigchild_handler);
 }
 
 /*
@@ -368,9 +505,9 @@ void run_job(struct Job *job, char *envp[])
  *   unused_fd: a pipe end the child must close, or -1 if none
  * Returns the child's pid, or -1 if fork failed. Does NOT wait.
  */
-pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd, char *envp[])
+int spawn(struct Command *command, int in_fd, int out_fd, int unused_fd, int pgid, char *envp[])
 {
-    pid_t pid = fork();
+    int pid = fork();
 
     if (pid < 0)
     {
@@ -379,10 +516,18 @@ pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd, char 
         return -1;
     }
 
-    if (pid == 0)                       /* child */
+
+    if (pid == 0) /* child */
     {
+        if (pgid >= 0)
+        {  
+            setpgid(0, pgid); /*make current process's group id = pgid. If pgid = 0, then new group id = pid*/
+        }
+
         /* restoring the default signal handler in the child process */
-        signal(SIGINT, SIG_DFL);
+        signal(SIGINT, SIG_DFL); /*for ctrl + C*/
+        signal(SIGTSTP, SIG_DFL);/*for ctrl + Z*/
+        signal(SIGTTOU, SIG_DFL);
         if (in_fd != 0)
         {
             dup2(in_fd, 0);             /* standard input now comes from in_fd */
@@ -405,8 +550,13 @@ pid_t spawn(struct Command *command, int in_fd, int out_fd, int unused_fd, char 
 
 void cleanup_zombies(void)
 {
-    while (waitpid(-1, NULL, WNOHANG) > 0)
+    pid_t pid;
+    while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
     {
-        /* cleanup zombies */
+        /* if our saved background job finished, reset saved_pgid */
+        if (pid == saved_pgid)
+        {
+            saved_pgid = 0;
+        }
     }
 }

@@ -9,8 +9,9 @@ static int pos;
 
 static int is_special(const char *tok)
 {
-    return my_strcmp(tok, "|") == 0 || my_strcmp(tok, "<") == 0 ||
-        my_strcmp(tok, ">") == 0 || my_strcmp(tok, "&") == 0;
+        return my_strcmp(tok, "|") == 0 || my_strcmp(tok, "<") == 0 ||
+        my_strcmp(tok, ">") == 0 || my_strcmp(tok, ">>") == 0 ||
+        my_strcmp(tok, "&") == 0;
 }
 
 static int parse_error(const char *message)
@@ -86,6 +87,7 @@ int parse_job(struct Job *job)
     job->infile_path = NULL;
     job->outfile_path = NULL;
     job->background = 0;
+    job->append = 0;
 
     if (parse_pipeline(job) != 0){
         return PARSE_ERROR;
@@ -99,13 +101,20 @@ int parse_job(struct Job *job)
         }
     }
 
-    if (pos < num_tokens && my_strcmp(tokens[pos], ">") == 0)
+    /* ---- NEW: replaces the old "> only" block ---- */
+    if (pos < num_tokens &&
+        (my_strcmp(tokens[pos], ">") == 0 || my_strcmp(tokens[pos], ">>") == 0))
     {
+        if (my_strcmp(tokens[pos], ">>") == 0)
+        {
+            job->append = 1;
+        }
         if (parse_filename(&job->outfile_path) != 0)
         {
             return PARSE_ERROR;
         }
     }
+    /* ---- end of new block ---- */
 
     if (pos < num_tokens && my_strcmp(tokens[pos], "&") == 0)
     {

@@ -7,18 +7,15 @@
 #   ./test_mysh.sh              # tests ./mysh
 #   ./test_mysh.sh ./myshell    # or pass the path to your binary
 #
+# Results are printed to the screen and also saved to test_results.md
+# (Category | Input | Expected output | Actual output | Result).
+# The manual tests (Ctrl+C, Ctrl+Z, fg/bg on stopped jobs, zombies) are added
+# at the end of test_results.md with an empty "Actual" column to fill in.
+#
 # Each test feeds lines to the shell on standard input (one read() per line),
 # then closes input like Ctrl+D, and checks stdout, stderr and any files made.
 # Limits (BUFFER_SIZE, MAX_ARGS, MAX_TOKENS, MAX_PIPELINE_LEN, HEAP_SIZE) are
 # read from your .h files so the boundary tests match your code.
-#
-# Best run on the course's Linux machine. On macOS, install `timeout` with
-# `brew install coreutils` so a hanging test can't freeze the run, and expect
-# small differences (macOS restarts read() after signals, and has extra
-# commands like /usr/bin/exit).
-#
-# Tests that need a real keyboard (Ctrl+C, Ctrl+Z, fg/bg on stopped jobs,
-# zombies) are listed in the MANUAL TESTS section at the bottom.
 
 set -u
 
@@ -29,6 +26,7 @@ if [ ! -x "$BIN" ]; then
 fi
 BIN=$(cd "$(dirname "$BIN")" && pwd -P)/$(basename "$BIN")
 SRC=$(dirname "$BIN")
+REPORT="$SRC/test_results.md"
 
 TMP=$(cd "$(mktemp -d)" && pwd -P)
 WORK="$TMP/work"
@@ -36,11 +34,13 @@ mkdir -p "$WORK"
 trap 'rm -rf "$TMP"' EXIT
 printf 'banana\napple\ncherry\n' > "$WORK/in.txt"
 
-TIMEOUT=""
+# Kill the shell if a single test runs longer than 10 seconds, so a hang or
+# infinite loop fails that test instead of freezing the whole run.
 if command -v timeout >/dev/null 2>&1; then TIMEOUT="timeout 10"
-elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT="gtimeout 10"; fi
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT="gtimeout 10"
+else TIMEOUT="perl -e alarm(10);exec{\$ARGV[0]}@ARGV"; fi   # perl ships with macOS
 
-pass=0; fail=0; skipped=0; NAME=""; STATUS=0
+pass=0; fail=0; skipped=0; NAME=""; STATUS=0; CAT=""; INPUT=""; ROWS=""
 
 # ---------- helpers ----------
 
@@ -51,35 +51,88 @@ define() {   # value of a #define from your headers, or empty
 rep()   { local s="" i; for ((i=0; i<$2; i++)); do s+="$1"; done; printf '%s' "$s"; }
 words() { local s="" i; for ((i=0; i<$1; i++)); do s+=" a"; done; printf '%s' "$s"; }
 
+short() {    # shorten long text for the report: first 50 chars + length
+  local s=$1
+  if [ ${#s} -gt 70 ]; then printf '%s... (%d chars)' "${s:0:50}" "${#s}"; else printf '%s' "$s"; fi
+}
+cell() {     # make text safe for a markdown table cell, shown as code
+  local s=$1
+  s=${s//$'\n'/ / }; s=${s//$'\t'/<TAB>}
+  s=$(printf '%s' "$s" | sed -e 's/\\/\\\\/g' -e 's/|/\\|/g' -e 's/`/'"'"'/g')
+  if [ -z "$s" ]; then printf '*(empty)*'; else printf '`%s`' "$s"; fi
+}
+
+section() { CAT=$1; echo "== $1"; }
+
 run() {      # run LINE... : one line per read, then end of input
   : > "$TMP/out"; : > "$TMP/err"
+  INPUT=""
+  local l first=1
+  for l in "$@"; do
+    [ $first -eq 1 ] || INPUT+=$'\n'
+    first=0
+    if [ -z "${l//[$' \t']/}" ]; then INPUT+="(blank line: '$l')"; else INPUT+="$(short "$l")"; fi
+  done
   ( cd "$WORK" && { for line in "$@"; do printf '%s\n' "$line"; sleep 0.3; done; } \
       | $TIMEOUT "$BIN" > "$TMP/out" 2> "$TMP/err" )
   STATUS=$?
 }
 stdout() { sed 's/\$ //g' "$TMP/out"; }   # stdout with "$ " prompts removed
+outtxt() { stdout | sed '/^$/d'; }        # stdout without blank lines, for the report
+errtxt() { cat "$TMP/err"; }
 
-t()    { NAME=$1; }
-ok()   { pass=$((pass+1)); printf '  PASS  %s\n' "$NAME"; }
-skip() { skipped=$((skipped+1)); printf '  SKIP  %s\n' "$1"; }
-bad()  {
-  fail=$((fail+1)); printf '  FAIL  %s\n        %s\n' "$NAME" "$1"
-  printf '        stdout: %s\n' "$(stdout | head -c 200 | tr '\n' '|')"
-  printf '        stderr: %s\n' "$(head -c 200 "$TMP/err" | tr '\n' '|')"
+t() { NAME=$1; }
+
+record() {   # record RESULT EXPECTED ACTUAL
+  local res=$1 exp=$2 act=$3
+  if [ "$res" = PASS ]; then
+    pass=$((pass+1)); printf '  PASS  %s\n' "$NAME"
+  else
+    fail=$((fail+1)); printf '  FAIL  %s\n        expected: %s\n        actual:   %s\n' \
+      "$NAME" "${exp//$'\n'/ / }" "${act//$'\n'/ / }"
+  fi
+  local mark="PASS"; [ "$res" = PASS ] || mark="FAIL"
+  ROWS+="| $CAT | $NAME | $(cell "$INPUT") | $(cell "$exp") | $(cell "$act") | $mark |"$'\n'
 }
-has_out()   { if stdout | grep -qF -- "$1"; then ok; else bad "stdout should contain: $1"; fi; }
-has_line()  { if stdout | grep -qxF -- "$1"; then ok; else bad "stdout should have the line: $1"; fi; }
-lacks_out() { if stdout | grep -qF -- "$1"; then bad "stdout should NOT contain: $1"; else ok; fi; }
-has_err()   { if grep -qF -- "$1" "$TMP/err"; then ok; else bad "stderr should contain: $1"; fi; }
-no_err()    { if [ -s "$TMP/err" ]; then bad "stderr should be empty"; else ok; fi; }
-no_crash()  { if [ "$STATUS" -ge 124 ]; then bad "shell crashed or hung (exit status $STATUS)"; else ok; fi; }
-file_is()   {
-  if [ -f "$WORK/$1" ] && [ "$(cat "$WORK/$1")" = "$2" ]; then ok
-  else bad "file $1 should contain: $(printf '%s' "$2" | tr '\n' '|')"; fi
+skip() {
+  skipped=$((skipped+1)); printf '  SKIP  %s\n' "$1"
+  ROWS+="| $CAT | $1 | - | - | - | SKIP |"$'\n'
+}
+
+# Checks. Each one records a row with what was expected and what actually happened.
+has_out() {
+  if stdout | grep -qF -- "$1"; then r=PASS; else r=FAIL; fi
+  record $r "stdout contains: $(short "$1")" "stdout: $(short "$(outtxt)")"
+}
+has_line() {
+  if stdout | grep -qxF -- "$1"; then r=PASS; else r=FAIL; fi
+  record $r "stdout: $(short "$1")" "stdout: $(short "$(outtxt)")"
+}
+lacks_out() {
+  if stdout | grep -qF -- "$1"; then r=FAIL; else r=PASS; fi
+  record $r "stdout does not contain: $(short "$1")" "stdout: $(short "$(outtxt)")"
+}
+has_err() {
+  if grep -qF -- "$1" "$TMP/err"; then r=PASS; else r=FAIL; fi
+  record $r "stderr: $(short "$1")" "stderr: $(short "$(errtxt)")"
+}
+no_err() {
+  if [ -s "$TMP/err" ]; then r=FAIL; else r=PASS; fi
+  record $r "no error message" "stderr: $(short "$(errtxt)")"
+}
+no_crash() {
+  if [ "$STATUS" -ge 124 ]; then r=FAIL; else r=PASS; fi
+  record $r "shell exits normally" "exit status $STATUS"
+}
+file_is() {
+  local actual="(file not created)"
+  [ -f "$WORK/$1" ] && actual=$(cat "$WORK/$1")
+  if [ -f "$WORK/$1" ] && [ "$actual" = "$2" ]; then r=PASS; else r=FAIL; fi
+  record $r "$1 contains: $(short "$2")" "$1 contains: $(short "$actual")"
 }
 
 # ---------- basic commands ----------
-echo "== Basic commands"
+section "Basic commands"
 t "runs a simple command";                run 'echo hello';                    has_line "hello"
 t "simple command prints no error";                                             no_err
 t "collapses extra spaces";               run '   echo   a    b   ';            has_line "a b"
@@ -96,7 +149,7 @@ t "exit with extra words is not exit";    run 'exit now' 'echo alive';          
 t "end of input (Ctrl+D) exits cleanly";  run 'echo x';                         no_crash
 
 # ---------- environment variables ----------
-echo "== Environment variables"
+section "Environment variables"
 t '$HOME expands';                        run 'echo $HOME';                     has_line "$HOME"
 t '$PATH expands';                        run 'echo $PATH';                     has_out "$PATH"
 t 'unset variable expands to nothing';    run 'echo start $NO_SUCH_VAR_XYZ end'; has_out "end"
@@ -106,7 +159,7 @@ t 'very long variable name does not crash'
 run "echo \$$(rep A 100)" 'echo alive';                                          has_line "alive"
 
 # ---------- cd ----------
-echo "== cd"
+section "cd"
 t "cd to an absolute path";               run 'cd /usr' 'pwd';                  has_line "/usr"
 t "cd with no argument goes to HOME";     run 'cd' 'pwd';                       has_line "$HOME"
 t "cd .. goes up a level";                run 'cd ..' 'pwd';                    has_line "$TMP"
@@ -114,7 +167,7 @@ t "cd to a missing dir reports an error"; run 'cd /no/such/dir';                
 t "shell keeps working after failed cd";  run 'cd /no/such/dir' 'pwd';          has_line "$WORK"
 
 # ---------- redirection ----------
-echo "== Redirection"
+section "Redirection"
 t "> writes stdout to a file";            run 'echo hi > r1.out';               file_is r1.out "hi"
 t "> leaves the screen empty";                                                  lacks_out "hi"
 t "> overwrites an existing file";        run 'echo one > r2.out' 'echo two > r2.out'
@@ -136,7 +189,7 @@ t "two > redirections are rejected";      run 'echo hi > a.out > b.out';        
 t "two < redirections are rejected";      run 'sort < in.txt < in.txt';         has_err "Error: unexpected symbol."
 
 # ---------- pipes ----------
-echo "== Pipes"
+section "Pipes"
 t "two-stage pipe";                       run 'echo hello | tr a-z A-Z';        has_line "HELLO"
 t "three-stage pipe";                     run 'sort -r in.txt | head -n 2 | tail -n 1'
                                                                                  has_line "banana"
@@ -154,7 +207,7 @@ t "unknown command inside a pipe";        run 'echo hi | nosuchcmd_xyz' 'echo al
                                                                                  has_line "alive"
 
 # ---------- limits ----------
-echo "== Limits"
+section "Limits"
 BUF=$(define BUFFER_SIZE); MAXARGS=$(define MAX_ARGS); MAXTOK=$(define MAX_TOKENS)
 MAXPIPE=$(define MAX_PIPELINE_LEN); HEAP=$(define HEAP_SIZE)
 echo "   (from headers: BUFFER_SIZE=${BUF:-?} MAX_ARGS=${MAXARGS:-?} MAX_TOKENS=${MAXTOK:-?} MAX_PIPELINE_LEN=${MAXPIPE:-?} HEAP_SIZE=${HEAP:-?})"
@@ -202,14 +255,15 @@ if [ -n "$HEAP" ] && [ $((HEAP + 10)) -le "$LINE_MAX" ]; then
   t "token bigger than the heap is rejected";       run "echo $(rep x $((HEAP + 1)))"
                                                                              has_err "Error: Heap limit exceeded."
 else
-  skip "heap limit test (HEAP_SIZE missing or larger than one input line)"
+  skip "heap limit test (HEAP_SIZE larger than one input line, so it can't be reached)"
 fi
 
 # ---------- background jobs ----------
-echo "== Background jobs"
+section "Background jobs"
 t "& returns to the prompt right away"
 start=$(date +%s); run 'sleep 3 &' 'echo back'; elapsed=$(( $(date +%s) - start ))
-if [ "$elapsed" -lt 3 ]; then ok; else bad "took ${elapsed}s, the shell waited for the background job"; fi
+if [ "$elapsed" -lt 3 ]; then r=PASS; else r=FAIL; fi
+record $r "prompt returns in under 3s" "returned after ${elapsed}s"
 t "prompt works while a job runs in the background";                         has_line "back"
 t "background job produces its output";   run 'echo bg_output &'; sleep 0.5;  has_line "bg_output"
 t "background job with redirection";      run 'echo bgfile > bg1.out &'; sleep 0.5
@@ -221,46 +275,57 @@ t "words after & are rejected";           run 'sleep 1 & echo hi';           has
 t "& before a redirection is rejected";   run 'echo hi & > x.out';           has_err "Error: unexpected symbol."
 
 # ---------- fg / bg builtins ----------
-echo "== fg / bg"
+section "fg / bg"
 t "fg with no job";                       run 'fg';                          has_err "Error: no job to bring to foreground."
 t "bg with no job";                       run 'bg';                          has_err "Error: no job to resume in background."
 t "fg waits for a running background job"
 start=$(date +%s); run 'sleep 2 &' 'fg' 'echo after_fg'; elapsed=$(( $(date +%s) - start ))
-if [ "$elapsed" -ge 1 ]; then ok; else bad "fg returned after ${elapsed}s, it didn't wait for the job"; fi
+if [ "$elapsed" -ge 1 ]; then r=PASS; else r=FAIL; fi
+record $r "fg waits about 2s for sleep to finish" "returned after ${elapsed}s"
 t "shell continues after fg";                                                has_line "after_fg"
 
 # ---------- summary ----------
 echo
 echo "$pass passed, $fail failed, $skipped skipped"
-[ "$fail" -eq 0 ]
 
-# =====================================================================
-# MANUAL TESTS - run ./mysh in a real terminal and check each one
-# =====================================================================
-#  1. sleep 5, then Ctrl+C
-#       -> "-->mysh(task ended)" appears, prompt comes back, shell still runs
-#  2. Ctrl+C at an empty prompt
-#       -> message and a new prompt; the shell does NOT exit
-#  3. sleep 30, then Ctrl+Z
-#       -> "-->mysh(task suspended)", prompt comes back
-#  4. After step 3, type fg
-#       -> sleep resumes in the foreground; Ctrl+C now ends it
-#  5. sleep 30, Ctrl+Z, then bg
-#       -> prompt stays usable while sleep runs; fg later brings it back
-#  6. sleep 30 | sleep 30, Ctrl+Z, then fg
-#       -> both stages resume (whole process group), Ctrl+C ends both
-#  7. cat (no arguments), type a few lines, then Ctrl+D
-#       -> cat echoes each line, Ctrl+D ends cat, back at the mysh prompt
-#  8. cat, Ctrl+Z, then fg
-#       -> cat can read the keyboard again (terminal control handed back)
-#  9. sleep 30 &, then Ctrl+C at the prompt
-#       -> background sleep keeps running (check with: ps -ef | grep sleep)
-# 10. sleep 1 &, wait 2 seconds, press Enter, then in another terminal:
-#       ps -o pid,stat,comm -t $(tty of the mysh terminal)
-#     -> no process shows state Z (zombie)
-# 11. sleep 1 &, wait 2 seconds, then fg
-#       -> "Error: no job to bring to foreground." (finished job was cleared)
-# 12. Ctrl+D at an empty prompt
-#       -> prints a newline and exits
-# 13. Run a full-screen program (less in.txt or vim)
-#       -> it displays and takes keyboard input normally; q returns to mysh
+# ---------- write test_results.md ----------
+{
+  echo "# mysh Test Results"
+  echo
+  echo "- **Date:** $(date '+%Y-%m-%d %H:%M')"
+  echo "- **System:** $(uname -sm)"
+  echo "- **Binary:** \`$(basename "$BIN")\`"
+  echo "- **Limits from headers:** BUFFER_SIZE=${BUF:-?}, MAX_ARGS=${MAXARGS:-?}, MAX_TOKENS=${MAXTOK:-?}, MAX_PIPELINE_LEN=${MAXPIPE:-?}, HEAP_SIZE=${HEAP:-?}"
+  echo "- **Summary:** $pass passed, $fail failed, $skipped skipped"
+  echo
+  echo "Inputs with several lines are typed one after another (separated by ' / '). After the last line, input ends (same as Ctrl+D). Long inputs and outputs are shortened, with their full length in brackets."
+  echo
+  echo "## Automated tests"
+  echo
+  echo "| Category | Test | Input | Expected output | Actual output | Result |"
+  echo "|---|---|---|---|---|---|"
+  printf '%s' "$ROWS"
+  echo
+  echo "## Manual tests"
+  echo
+  echo "These need a real keyboard. Run \`./mysh\` in a terminal and fill in the Actual output and Result columns."
+  echo
+  echo "| Category | Test | Input | Expected output | Actual output | Result |"
+  echo "|---|---|---|---|---|---|"
+  echo "| Signals | Ctrl+C ends a foreground job | \`sleep 5\`, then Ctrl+C | \`-->mysh(task ended)\`, prompt returns, shell keeps running | | |"
+  echo "| Signals | Ctrl+C at an empty prompt | Ctrl+C | message and a new prompt; shell does not exit | | |"
+  echo "| Signals | Ctrl+Z suspends a job | \`sleep 30\`, then Ctrl+Z | \`-->mysh(task suspended)\`, prompt returns | | |"
+  echo "| Job control | fg resumes a suspended job | \`sleep 30\`, Ctrl+Z, \`fg\` | sleep resumes in the foreground; Ctrl+C now ends it | | |"
+  echo "| Job control | bg resumes in the background | \`sleep 30\`, Ctrl+Z, \`bg\` | prompt stays usable while sleep runs | | |"
+  echo "| Job control | fg resumes a whole pipeline | \`sleep 30 \\| sleep 30\`, Ctrl+Z, \`fg\` | both stages resume; Ctrl+C ends both | | |"
+  echo "| Terminal | Program reads the keyboard | \`cat\`, type lines, Ctrl+D | cat echoes each line; Ctrl+D returns to the mysh prompt | | |"
+  echo "| Terminal | Terminal handed back after fg | \`cat\`, Ctrl+Z, \`fg\` | cat can read the keyboard again | | |"
+  echo "| Signals | Ctrl+C doesn't hit background jobs | \`sleep 30 &\`, then Ctrl+C | background sleep keeps running (\`ps -ef \\| grep sleep\`) | | |"
+  echo "| Zombies | Finished background jobs are reaped | \`sleep 1 &\`, wait 2s, press Enter | no process in state Z (\`ps -o pid,stat,comm\`) | | |"
+  echo "| Job control | Finished job is forgotten | \`sleep 1 &\`, wait 2s, \`fg\` | \`Error: no job to bring to foreground.\` | | |"
+  echo "| Basic | Ctrl+D at an empty prompt | Ctrl+D | prints a newline and exits | | |"
+  echo "| Terminal | Full-screen program works | \`less in.txt\` | displays and scrolls normally; q returns to mysh | | |"
+} > "$REPORT"
+echo "Results saved to $(basename "$REPORT")"
+
+[ "$fail" -eq 0 ]
