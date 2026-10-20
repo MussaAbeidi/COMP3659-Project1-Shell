@@ -96,3 +96,7 @@
 ### Pull Requests
 
 > Once a feature is fully tested and compiling on the Linux VM, we will push the branch and open a Pull Request on GitHub. This will be done with a clear and detailed title and description. Then, we require at least one other group member to review the code changes, test them, and either approve it or deny it (with a comment in reply elaborating on why it is denied). Once approved, then it will be merged to ```main```. Finally, after it has been merged, the branch will be deleted to keep the repository clean and organized.
+
+### NOTE
+
+> CREDIT: Generative AI was consulted to assist in formatting the automated test, as there were 50+ tests, the use of AI was used to assist and help complete the lengthy test file and for brainstorming edge cases, and specific test functions. However NO AI was used in the main project, only for testing/QA.
