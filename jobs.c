@@ -224,9 +224,15 @@ int get_job(struct Job *job)    // changed
     print_prompt();
     read_input();
 
-    if (check_read_error())
+        if (check_read_error())
     {
         return READ_ERROR;
+    }
+    
+    if (bytes_read == 0)    /* Ctrl+D or end of input: nothing was read */
+    {
+        write(1, "\n", 1);
+        return EXIT;
     }
     if (buffer_overflow_detected())
     {
